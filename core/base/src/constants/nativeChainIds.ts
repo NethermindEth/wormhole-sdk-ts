@@ -55,6 +55,7 @@ const chainNetworkNativeChainIdEntries = [
       ["Plume",     98866n],
       ["XRPLEVM",   1440000n],
       ["Stacks",    1n],
+      ["Stellar",   "Public Global Stellar Network ; September 2015"],
       ["CreditCoin",   102030n],
       ["Monad",     143n],
       ["Fogo",      "CDLtwKnaCoK157uaHQDj4fHu72AyD2519Cphmpiq6hvT"], // genesis hash
@@ -117,6 +118,7 @@ const chainNetworkNativeChainIdEntries = [
       ["Plume",           98867n],
       ["XRPLEVM",         1449000n],
       ["Stacks",          2147483648n],
+      ["Stellar",         "Test SDF Network ; September 2015"],
       ["Moca",            222888n],
       ["MegaETH",         6343n],
     ],
@@ -131,6 +133,7 @@ const chainNetworkNativeChainIdEntries = [
       ["Injective","injective_devnet_fake"],
       ["Solana",    "8wF6jKV3cKwyaVkWcoV9KpDqmkjvEYno9hKZrKx8TbZn"],
       ["Stacks",    2147483648n],
+      ["Stellar",   "Standalone Network ; February 2017"],
     ],
   ],
 ] as const satisfies MapLevels<[Network, Chain, bigint | string]>;

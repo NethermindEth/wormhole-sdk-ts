@@ -207,6 +207,15 @@ const explorerConfig = [[
           account: "address/"
         }
       }
+    ], [
+      "Stellar", {
+        name: "Stellar Expert",
+        baseUrl: "https://stellar.expert/explorer/public/",
+        endpoints: {
+          tx: "tx/",
+          account: "account/"
+        }
+      }
     ]
   ]], [
   "Testnet", [[
@@ -376,6 +385,15 @@ const explorerConfig = [[
         endpoints: {
           tx: "tx/",
           account: "address/"
+        }
+      }
+    ], [
+      "Stellar", {
+        name: "Stellar Expert",
+        baseUrl: "https://stellar.expert/explorer/testnet/",
+        endpoints: {
+          tx: "tx/",
+          account: "account/"
         }
       }
     ]
