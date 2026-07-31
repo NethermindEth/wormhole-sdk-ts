@@ -46,6 +46,7 @@ const chainIdAndChainEntries = [
   [   58, "Plasma"         ],
   [   59, "CreditCoin"     ],
   [   60, "Stacks"         ],
+  [   61, "Stellar"        ],
   [   63, "Moca"           ],
   [   64, "MegaETH"        ],
   [   66, "Xrpl"           ],

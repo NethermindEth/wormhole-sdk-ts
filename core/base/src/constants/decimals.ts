@@ -14,6 +14,7 @@ const nativeDecimalEntries = [
   ["Btc",          8],
   ["Near",        12],
   ["Stacks",       6],
+  ["Stellar",      7],
   ["Xrpl",         6],
 ] as const satisfies MapLevel<Platform, number>;
 
