@@ -88,6 +88,11 @@
       "import": "./dist/esm/platforms/stacks.js",
       "default": "./dist/esm/platforms/stacks.js"
     },
+    "./platforms/stellar": {
+      "types": "./dist/esm/platforms/stellar.d.ts",
+      "import": "./dist/esm/platforms/stellar.js",
+      "default": "./dist/esm/platforms/stellar.js"
+    },
     "./evm": {
       "types": "./dist/esm/evm.d.ts",
       "import": "./dist/esm/evm.js",
@@ -122,6 +127,11 @@
       "types": "./dist/esm/stacks.d.ts",
       "import": "./dist/esm/stacks.js",
       "default": "./dist/esm/stacks.js"
+    },
+    "./stellar": {
+      "types": "./dist/esm/stellar.d.ts",
+      "import": "./dist/esm/stellar.js",
+      "default": "./dist/esm/stellar.js"
     },
     "./platforms/xrpl": {
       "types": "./dist/esm/platforms/xrpl.d.ts",
@@ -174,6 +184,10 @@
         "dist/esm/stacks.d.ts",
         "dist/esm/stacks.d.ts"
       ],
+      "stellar": [
+        "dist/esm/stellar.d.ts",
+        "dist/esm/stellar.d.ts"
+      ],
       "platforms/algorand": [
         "dist/esm/platforms/algorand.d.ts",
         "dist/esm/platforms/algorand.d.ts"
@@ -201,6 +215,10 @@
       "platforms/stacks": [
         "dist/esm/platforms/stacks.d.ts",
         "dist/esm/platforms/stacks.d.ts"
+      ],
+      "platforms/stellar": [
+        "dist/esm/platforms/stellar.d.ts",
+        "dist/esm/platforms/stellar.d.ts"
       ],
       "xrpl": [
         "dist/esm/xrpl.d.ts",
@@ -256,6 +274,8 @@
     "@wormhole-foundation/sdk-algorand-tokenbridge": "1.20.0",
     "@wormhole-foundation/sdk-stacks": "1.20.0",
     "@wormhole-foundation/sdk-stacks-core": "1.20.0",
+    "@wormhole-foundation/sdk-stellar": "1.20.0",
+    "@wormhole-foundation/sdk-stellar-core": "1.20.0",
     "@wormhole-foundation/sdk-xrpl": "1.20.0",
     "@wormhole-foundation/sdk-btc": "1.20.0"
   },
