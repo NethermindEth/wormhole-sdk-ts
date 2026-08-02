@@ -70,6 +70,7 @@
     "platforms/stacks",
     "platforms/stacks/protocols/core",
     "platforms/stellar",
+    "platforms/stellar/protocols/core",
     "platforms/xrpl",
     "platforms/btc",
     "platforms/algorand",
