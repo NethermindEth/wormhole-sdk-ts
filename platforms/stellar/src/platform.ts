@@ -162,7 +162,7 @@ export class StellarPlatform<N extends Network>
   }
 
   // Build and simulate a read-only contract call, returning its decoded result.
-  private static async simulateRead(
+  static async simulateRead(
     rpc: SorobanRpc.Server,
     network: Network,
     contractId: string,

@@ -70,6 +70,7 @@
     "platforms/stacks",
     "platforms/stacks/protocols/core",
     "platforms/stellar",
+    "platforms/stellar/protocols/core",
     "platforms/algorand",
     "platforms/algorand/protocols/core",
     "platforms/algorand/protocols/tokenBridge",
