@@ -69,6 +69,7 @@
     "platforms/cosmwasm/protocols/ibc",
     "platforms/stacks",
     "platforms/stacks/protocols/core",
+    "platforms/stellar",
     "platforms/xrpl",
     "platforms/btc",
     "platforms/algorand",
