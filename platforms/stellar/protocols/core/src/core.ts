@@ -1,13 +1,5 @@
-import {
-  Address,
-  BASE_FEE,
-  Contract,
-  TransactionBuilder,
-  nativeToScVal,
-  scValToNative,
-  rpc as SorobanRpc,
-  xdr,
-} from "@stellar/stellar-sdk";
+import type { rpc as SorobanRpc, xdr } from "@stellar/stellar-sdk";
+import { nativeToScVal, scValToNative } from "@stellar/stellar-sdk";
 import type {
   AccountAddress,
   ChainsConfig,
@@ -19,17 +11,11 @@ import type {
   WormholeMessageId,
 } from "@wormhole-foundation/sdk-connect";
 import { UniversalAddress, createVAA, encoding, serialize } from "@wormhole-foundation/sdk-connect";
-import {
-  StellarAddress,
-  StellarPlatform,
-  StellarUnsignedTransaction,
-  nativeSacId,
-  stellarNetworkPassphrase,
-} from "@wormhole-foundation/sdk-stellar";
+import { StellarPlatform } from "@wormhole-foundation/sdk-stellar";
 import type {
-  AnyStellarAddress,
   StellarChains,
   StellarPlatformType,
+  StellarUnsignedTransaction,
 } from "@wormhole-foundation/sdk-stellar";
 
 // A decoded `message_published` core event.
@@ -41,6 +27,26 @@ type PublishedMessage = {
   payload: Uint8Array;
 };
 
+// Soroban returns integers as `bigint` or `number` depending on their width, so
+// callers cannot know which to expect. Convert through here rather than through
+// a bare `BigInt(…)`/`Number(…)`, which would turn an unexpected shape (a
+// `null` from an `Option`, a struct from a changed ABI) into `NaN` or a throw
+// far from its cause.
+function asBigInt(value: unknown, what: string): bigint {
+  if (typeof value === "bigint" || typeof value === "number") return BigInt(value);
+  throw new Error(`Expected an integer from ${what}, got: ${String(value)}`);
+}
+
+/**
+ * WormholeCore bindings for the Stellar (Soroban) core contract.
+ *
+ * Reads (`getMessageFee`, `getGuardianSetIndex`, `getGuardianSet`,
+ * `verifyMessage`) run as read-only simulations and never yield a transaction
+ * to sign. `parseTransaction`/`parseMessages` reobserve a published message by
+ * decoding the core's `message_published` events for a transaction.
+ *
+ * Publishing is not available through this class — see {@link publishMessage}.
+ */
 export class StellarWormholeCore<N extends Network, C extends StellarChains>
   implements WormholeCore<N, C>
 {
@@ -56,6 +62,7 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
     this.coreAddress = contracts.coreBridge;
   }
 
+  /** Build an instance from an RPC connection, resolving the chain from its network passphrase. */
   static async fromRpc<N extends Network>(
     provider: SorobanRpc.Server,
     config: ChainsConfig<N, StellarPlatformType>,
@@ -67,67 +74,74 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
     return new StellarWormholeCore(network as N, chain, provider, conf.contracts);
   }
 
+  /** The fee, in stroops, the core charges to publish a message (0 when unset). */
   async getMessageFee(): Promise<bigint> {
-    return BigInt((await this.read("get_message_fee")) as bigint | number);
+    return asBigInt(await this.read("get_message_fee"), "get_message_fee");
   }
 
+  /** Index of the guardian set currently allowed to sign VAAs. */
   async getGuardianSetIndex(): Promise<number> {
-    return Number(await this.read("get_current_guardian_set_index"));
+    return Number(
+      asBigInt(await this.read("get_current_guardian_set_index"), "get_current_guardian_set_index"),
+    );
   }
 
+  /**
+   * The guardian set at `index`, with its 20-byte keys hex-encoded.
+   *
+   * `expiry` is 0 while the set is still current, matching the other platforms:
+   * the contract's `get_guardian_set_expiry` is an `Option<u64>` that is only
+   * populated once the set has been superseded by a guardian set upgrade.
+   */
   async getGuardianSet(index: number): Promise<WormholeCore.GuardianSet> {
     const arg = nativeToScVal(index, { type: "u32" });
-    const [set, expiry] = await Promise.all([
+    const [info, expiry] = await Promise.all([
       this.read("get_guardian_set", arg),
       this.read("get_guardian_set_expiry", arg),
     ]);
-    // get_guardian_set returns the 20-byte guardian keys as a Vec<BytesN<20>>.
-    const keys = (set as Uint8Array[]).map((k) => encoding.hex.encode(k));
-    return { index, keys, expiry: BigInt(expiry as bigint | number) };
+    // get_guardian_set returns GuardianSetInfo { keys: Vec<BytesN<20>>, creation_time: u64 }.
+    const { keys } = info as { keys: Uint8Array[]; creation_time: bigint };
+    if (!Array.isArray(keys)) throw new Error("Expected guardian keys from get_guardian_set");
+    return {
+      index,
+      keys: keys.map((k) => encoding.hex.encode(k)),
+      expiry: expiry == null ? 0n : asBigInt(expiry, "get_guardian_set_expiry"),
+    };
   }
 
+  /**
+   * Not supported on Stellar.
+   *
+   * The core's `post_message` requires the emitter to be a *contract* address
+   * (it rejects anything but an `AddressPayload::ContractIdHash` with
+   * `InvalidEmitterAddress`), and a contract emitter can only satisfy
+   * `require_auth()` from inside its own invocation frame. A transaction
+   * sourced by an account therefore has no way to publish: messages are emitted
+   * by an integrator contract calling the core, not by this SDK.
+   */
   async *publishMessage(
-    sender: AccountAddress<C>,
-    message: string | Uint8Array,
-    nonce: number,
-    consistencyLevel: number,
+    _sender: AccountAddress<C>,
+    _message: string | Uint8Array,
+    _nonce: number,
+    _consistencyLevel: number,
   ): AsyncGenerator<StellarUnsignedTransaction<N, C>> {
-    const from = new StellarAddress(sender as AnyStellarAddress).toString();
-    const payload = message instanceof Uint8Array ? message : new TextEncoder().encode(message);
-
-    // The core pulls the fee via transfer_from, so when a fee is set the sender
-    // must first grant the core an allowance on the native XLM SAC. This yields
-    // as its own (non-parallelizable) tx, so it is confirmed before post_message
-    // is simulated below.
-    const fee = await this.getMessageFee();
-    if (fee > 0n) {
-      const { sequence } = await this.provider.getLatestLedger();
-      const approve = new Contract(nativeSacId(this.network)).call(
-        "approve",
-        new Address(from).toScVal(),
-        new Address(this.coreAddress).toScVal(),
-        nativeToScVal(fee, { type: "i128" }),
-        nativeToScVal(sequence + 6000, { type: "u32" }),
-      );
-      yield await this.prepare(from, approve, "StellarWormholeCore.approve");
-    }
-
-    const post = new Contract(this.coreAddress).call(
-      "post_message",
-      new Address(from).toScVal(),
-      nativeToScVal(nonce, { type: "u32" }),
-      nativeToScVal(Buffer.from(payload), { type: "bytes" }),
-      nativeToScVal(consistencyLevel, { type: "u32" }),
+    throw new Error(
+      "Stellar messages must be published by an integrator contract calling the core's " +
+        "post_message; the core rejects account emitters, so publishMessage is not available.",
     );
-    yield await this.prepare(from, post, "StellarWormholeCore.publishMessage");
   }
 
-  // verify_vaa is read-only: simulate it (which reverts on an invalid VAA) and
-  // return without yielding a transaction to sign.
+  /**
+   * Check a VAA against the core's guardian set.
+   *
+   * `verify_vaa` is read-only, so this simulates the call — which reverts on an
+   * invalid VAA — and returns without yielding a transaction to sign.
+   */
   async *verifyMessage(_sender: AccountAddress<C>, vaa: VAA): AsyncGenerator<never> {
     await this.read("verify_vaa", nativeToScVal(Buffer.from(serialize(vaa)), { type: "bytes" }));
   }
 
+  /** The message ids (chain/emitter/sequence) published by a transaction. */
   async parseTransaction(txid: TxHash): Promise<WormholeMessageId[]> {
     return (await this.parseEvents(txid)).map((m) => ({
       chain: this.chain,
@@ -136,6 +150,7 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
     }));
   }
 
+  /** The messages published by a transaction, as unsigned (reobserved) VAAs. */
   async parseMessages(txid: TxHash): Promise<VAA<"Uint8Array">[]> {
     return (await this.parseEvents(txid)).map((m) =>
       createVAA("Uint8Array", {
@@ -155,10 +170,14 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
   // Fetch and decode the core's `message_published` events for a transaction.
   private async parseEvents(txid: TxHash): Promise<PublishedMessage[]> {
     const tx = await this.provider.getTransaction(txid);
-    if (tx.status !== "SUCCESS") return [];
+    if (tx.status !== "SUCCESS")
+      throw new Error(`Stellar tx ${txid} did not succeed: ${tx.status}`);
 
+    // The events of interest are all in the ledger the tx landed in; bounding
+    // the query there keeps it from scanning every later ledger too.
     const { events } = await this.provider.getEvents({
       startLedger: tx.ledger,
+      endLedger: tx.ledger + 1,
       filters: [{ type: "contract", contractIds: [this.coreAddress] }],
     });
 
@@ -179,9 +198,11 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
       };
       messages.push({
         emitter: new UniversalAddress(v.emitter_address),
-        sequence: BigInt(v.sequence),
-        nonce: Number(v.nonce),
-        consistencyLevel: Number(v.consistency_level),
+        sequence: asBigInt(v.sequence, "message_published.sequence"),
+        nonce: Number(asBigInt(v.nonce, "message_published.nonce")),
+        consistencyLevel: Number(
+          asBigInt(v.consistency_level, "message_published.consistency_level"),
+        ),
         payload: v.payload,
       });
     }
@@ -196,22 +217,5 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
       method,
       ...args,
     );
-  }
-
-  private async prepare(
-    from: string,
-    operation: xdr.Operation,
-    description: string,
-  ): Promise<StellarUnsignedTransaction<N, C>> {
-    const source = await this.provider.getAccount(from);
-    const tx = new TransactionBuilder(source, {
-      fee: BASE_FEE,
-      networkPassphrase: stellarNetworkPassphrase(this.network),
-    })
-      .addOperation(operation)
-      .setTimeout(30)
-      .build();
-    const prepared = await this.provider.prepareTransaction(tx);
-    return new StellarUnsignedTransaction(prepared, this.network, this.chain, description, false);
   }
 }
