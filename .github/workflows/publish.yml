@@ -53,6 +53,7 @@ jobs:
             --workspace platforms/sui/protocols \
             --workspace platforms/aptos/protocols \
             --workspace platforms/stacks/protocols \
+            --workspace platforms/stellar/protocols \
             --workspace sdk
         # OIDC authentication is used automatically by npm CLI 11.5.1+
         # No NPM_TOKEN secret needed - authentication happens via OpenID Connect
