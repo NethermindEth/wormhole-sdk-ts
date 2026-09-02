@@ -43,6 +43,7 @@
     "prettier": "prettier --write ./src"
   },
   "dependencies": {
+    "@stellar/stellar-sdk": "^14.0.0",
     "@wormhole-foundation/sdk-connect": "1.20.0",
     "@wormhole-foundation/sdk-stellar": "1.20.0"
   },
