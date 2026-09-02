@@ -72,6 +72,7 @@ const finalityThresholds = [
   ["Provenance", 0],
   ["Noble",      0],
   ["Stacks",     240], // tied to BTC finality
+  ["Stellar",    0],   // deterministic single-ledger finality via SCP
   ["Moca",       0],
   ["MegaETH",    4096],
   ["ZeroGravity",1], // CometBFT-style instant finality
@@ -151,6 +152,7 @@ const blockTimeMilliseconds = [
   ["Seievm",              400],
   ["CreditCoin",       15_000],
   ["Stacks",           15_000],
+  ["Stellar",           5_000],
   ["Moca",              1_000],
   ["MegaETH",           1_000],
   ["ZeroGravity",       1_000],

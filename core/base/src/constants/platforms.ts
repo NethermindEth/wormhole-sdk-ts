@@ -85,6 +85,9 @@ const platformAndChainsEntries = [[
     "Stacks", [
       "Stacks"
   ]], [
+    "Stellar", [
+      "Stellar"
+  ]], [
     "Xrpl", [
       "Xrpl"
   ]]
@@ -113,6 +116,7 @@ const platformAddressFormatEntries = [
   ["Aptos",     "hex"],
   ["Near",      "sha256"],
   ["Stacks",    "keccak256"],
+  ["Stellar",   "keccak256"],
   ["Xrpl",      "base58"],
 ] as const;
 

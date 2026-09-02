@@ -52,6 +52,7 @@ const chainNetworkNativeChainIdEntries = [
       ["Xrpl",        0n],
       ["XRPLEVM",     1440000n],
       ["Stacks",      1n],
+      ["Stellar",     "Public Global Stellar Network ; September 2015"],
       ["CreditCoin",  102030n],
       ["Plasma",      9745n],
       ["Monad",       143n],
@@ -117,6 +118,7 @@ const chainNetworkNativeChainIdEntries = [
       ["Xrpl",            1n],
       ["XRPLEVM",         1449000n],
       ["Stacks",          2147483648n],
+      ["Stellar",         "Test SDF Network ; September 2015"],
       ["CreditCoin",      102031n],
       ["Plasma",          9746n],
       ["Moca",            222888n],
@@ -138,6 +140,7 @@ const chainNetworkNativeChainIdEntries = [
       ["Injective","injective_devnet_fake"],
       ["Solana",    "8wF6jKV3cKwyaVkWcoV9KpDqmkjvEYno9hKZrKx8TbZn"],
       ["Stacks",    2147483648n],
+      ["Stellar",   "Standalone Network ; February 2017"],
     ],
   ],
 ] as const satisfies MapLevels<[Network, Chain, bigint | string]>;

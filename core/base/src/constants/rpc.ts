@@ -48,6 +48,7 @@ const rpcConfig = [[
     ["Plasma",      "https://rpc.plasma.to/"],
     ["CreditCoin",  "https://mainnet3.creditcoin.network/"],
     ["Stacks",      "https://api.mainnet.hiro.so"],
+    ["Stellar",     "https://mainnet.sorobanrpc.com"],
     ["Monad",       "https://rpc3.monad.xyz"],
     ["Fogo",        "https://mainnet.fogo.io"],
     ["Moca",        "https://rpc.mocachain.dev/"],
@@ -98,6 +99,7 @@ const rpcConfig = [[
     ["Plasma",          "https://testnet-rpc.plasma.to"],
     ["CreditCoin",      "https://rpc.cc3-testnet.creditcoin.network"],
     ["Stacks",          "https://api.testnet.hiro.so"],
+    ["Stellar",         "https://soroban-testnet.stellar.org"],
     ["Moca",            "https://testnet-rpc.mocachain.org/"],
     ["MegaETH",         "https://timothy.megaeth.com/rpc"],
     ["ZeroGravity",     "https://rpc.ankr.com/0g_galileo_testnet_evm"],
@@ -110,6 +112,7 @@ const rpcConfig = [[
     ["Bsc",       "http://eth-devnet2:8545"],
     ["Solana",    "http://solana-devnet:8899"],
     ["Stacks",    "http://localhost:3999"],
+    ["Stellar",   "http://localhost:8000/rpc"],
   ]],
 ] as const satisfies MapLevels<[Network, Chain, string]>;
 
