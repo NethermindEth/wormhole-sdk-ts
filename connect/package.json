@@ -99,7 +99,7 @@
   "dependencies": {
     "@wormhole-foundation/sdk-base": "1.20.0",
     "@wormhole-foundation/sdk-definitions": "1.20.0",
-    "axios": "^1.4.0"
+    "axios": "^1.20.0"
   },
   "type": "module",
   "devDependencies": {
