@@ -37,6 +37,21 @@ function asBigInt(value: unknown, what: string): bigint {
   throw new Error(`Expected an integer from ${what}, got: ${String(value)}`);
 }
 
+// The topics of a `message_published` event, as XDR, so that a string topic
+// with the same text does not match.
+const MESSAGE_TOPICS = ["wormhole", "message_published"].map((s) =>
+  nativeToScVal(s, { type: "symbol" }).toXDR("base64"),
+);
+
+// The fields of a `message_published` event, each with its ScVal type.
+const MESSAGE_FIELDS = {
+  nonce: "scvU32",
+  sequence: "scvU64",
+  emitter_address: "scvBytes",
+  payload: "scvBytes",
+  consistency_level: "scvU32",
+} satisfies Record<string, xdr.ScValType["name"]>;
+
 /**
  * WormholeCore bindings for the Stellar (Soroban) core contract.
  *
@@ -183,24 +198,50 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
         ? meta.v4().operations()[0]?.events() ?? []
         : meta.v3().sorobanMeta()?.events() ?? [];
 
+    // Keep only the events the guardian watcher signs, by the rules of
+    // `messageFromEvent`, `parseMessagePublished` and `parseMessageFromXDR` in
+    // `node/pkg/watchers/stellar/watcher.go` at NethermindEth/wormhole
+    // 946cef0d. The event is a contract event from the core with exactly the
+    // topics `wormhole` and `message_published`, both symbols. Its data is a
+    // map of exactly the five message fields, keyed by symbols, with a
+    // 32-byte emitter and a consistency level of at most 255.
     const messages: PublishedMessage[] = [];
     for (const ev of events) {
       const id = ev.contractId();
       const contract = id && Address.fromScAddress(xdr.ScAddress.scAddressTypeContract(id));
-      if (contract?.toString() !== this.coreAddress) continue;
+      if (ev.type().name !== "contract" || contract?.toString() !== this.coreAddress) continue;
       const body = ev.body().v0();
-      if (!body.topics().some((t) => scValToNative(t) === "message_published")) continue;
+      const topics = body.topics();
+      if (
+        topics.length !== MESSAGE_TOPICS.length ||
+        topics.some((t, i) => t.toXDR("base64") !== MESSAGE_TOPICS[i])
+      )
+        continue;
+
+      // With every field present and of its type, five entries leave no room
+      // for a duplicate or an extra field.
+      const data = body.data();
+      const entries = (data.switch().name === "scvMap" && data.map()) || [];
+      if (entries.some((e) => e.key().switch().name !== "scvSymbol")) continue;
+      const fields = new Map(entries.map((e) => [e.key().sym().toString(), e.val().switch().name]));
+      if (
+        entries.length !== Object.keys(MESSAGE_FIELDS).length ||
+        Object.entries(MESSAGE_FIELDS).some(([name, type]) => fields.get(name) !== type)
+      )
+        continue;
 
       // The event wire carries the raw 32-byte contract id as the emitter (not
       // the keccak256 hash_address), surfaced here as a raw UniversalAddress.
-      // consistency_level is a U32 (1=Confirmed / 32=Finalized).
-      const v = scValToNative(body.data()) as {
+      // consistency_level is a u32 on the wire; the core accepts 0 to 255, the
+      // range of the VAA's one byte.
+      const v = scValToNative(data) as {
         nonce: number | bigint;
         sequence: number | bigint;
         emitter_address: Uint8Array;
         payload: Uint8Array;
         consistency_level: number | bigint;
       };
+      if (v.emitter_address.length !== 32 || v.consistency_level > 255) continue;
       messages.push({
         emitter: new UniversalAddress(v.emitter_address),
         sequence: asBigInt(v.sequence, "message_published.sequence"),

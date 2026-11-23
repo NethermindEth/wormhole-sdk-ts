@@ -9,42 +9,39 @@ const TXID = "3389e9f0f1a0b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b";
 const EMITTER = StrKey.decodeContract(CORE); // raw 32-byte contract id (the Core emitter form)
 
 const symbol = (s: string) => nativeToScVal(s, { type: "symbol" });
+const u32 = (n: number) => nativeToScVal(n, { type: "u32" });
+const entry = (key: xdr.ScVal, val: xdr.ScVal) => new xdr.ScMapEntry({ key, val });
+
+// The fields of a core `message_published` event. Names and types follow the
+// core ABI as observed on a localnet deployment.
+const MESSAGE = {
+  nonce: u32(7),
+  sequence: nativeToScVal(0n, { type: "u64" }),
+  emitter_address: nativeToScVal(Buffer.from(EMITTER)),
+  payload: nativeToScVal(Buffer.from([1, 2, 3])),
+  consistency_level: u32(32),
+};
+
+// The data of a `message_published` event, with fields replaced, added, or
+// removed when set to `undefined`.
+const message = (fields: Record<string, xdr.ScVal | undefined> = {}) =>
+  xdr.ScVal.scvMap(
+    Object.entries({ ...MESSAGE, ...fields }).flatMap(([k, v]) => (v ? [entry(symbol(k), v)] : [])),
+  );
 
 // Build a contract event as a transaction's result meta holds it: by default,
-// a `message_published` event from the core. Field names/types follow the
-// core ABI as observed on a localnet deployment.
+// a `message_published` event from the core.
 const publishedEvent = ({
   contract = CORE,
+  type = xdr.ContractEventType.contract(),
   topics = [symbol("wormhole"), symbol("message_published")],
+  data = message(),
 } = {}) =>
   new xdr.ContractEvent({
     ext: new xdr.ExtensionPoint(0),
     contractId: StrKey.decodeContract(contract) as any,
-    type: xdr.ContractEventType.contract(),
-    body: new xdr.ContractEventBody(
-      0,
-      new xdr.ContractEventV0({
-        topics,
-        data: nativeToScVal(
-          {
-            nonce: 7,
-            sequence: 0n,
-            emitter_address: Buffer.from(EMITTER),
-            payload: Buffer.from([1, 2, 3]),
-            consistency_level: 32,
-          },
-          {
-            type: {
-              nonce: ["symbol", "u32"],
-              sequence: ["symbol", "u64"],
-              emitter_address: ["symbol", "bytes"],
-              payload: ["symbol", "bytes"],
-              consistency_level: ["symbol", "u32"],
-            },
-          },
-        ),
-      }),
-    ),
+    type,
+    body: new xdr.ContractEventBody(0, new xdr.ContractEventV0({ topics, data })),
   });
 
 // The result meta of a Soroban transaction since protocol 23 (v4), and before it
@@ -173,6 +170,45 @@ describe("StellarWormholeCore.parse", () => {
       ],
     });
     expect(await core.parseMessages(TXID)).toHaveLength(0);
+  });
+
+  // The guardian watcher never signs these, so they are not messages.
+  it.each([
+    ["a string topic", { topics: [symbol("wormhole"), nativeToScVal("message_published")] }],
+    ["one topic", { topics: [symbol("wormhole")] }],
+    ["swapped topics", { topics: [symbol("message_published"), symbol("wormhole")] }],
+    [
+      "three topics",
+      { topics: [symbol("wormhole"), symbol("message_published"), symbol("wormhole")] },
+    ],
+    ["a non-map value", { data: u32(1) }],
+    ["a system event type", { type: xdr.ContractEventType.system() }],
+    ["an extra data field", { data: message({ extra: u32(1) }) }],
+    ["a missing data field", { data: message({ payload: undefined }) }],
+    ["a field of the wrong type", { data: message({ nonce: nativeToScVal(7n, { type: "u64" }) }) }],
+    [
+      "a string key",
+      {
+        data: xdr.ScVal.scvMap([
+          entry(nativeToScVal("nonce"), u32(7)),
+          ...message({ nonce: undefined }).map()!,
+        ]),
+      },
+    ],
+    [
+      "a duplicate key",
+      { data: xdr.ScVal.scvMap([...message().map()!, entry(symbol("nonce"), u32(8))]) },
+    ],
+    ["a 20-byte emitter", { data: message({ emitter_address: nativeToScVal(Buffer.alloc(20)) }) }],
+    ["a consistency level of 256", { data: message({ consistency_level: u32(256) }) }],
+  ])("ignores an event with %s", async (_, event) => {
+    expect(await coreWith({ events: [publishedEvent(event)] }).parseMessages(TXID)).toHaveLength(0);
+  });
+
+  it.each([200, 255])("accepts a consistency level of %i", async (level) => {
+    const event = publishedEvent({ data: message({ consistency_level: u32(level) }) });
+    const [vaa] = await coreWith({ events: [event] }).parseMessages(TXID);
+    expect(vaa!.consistencyLevel).toBe(level);
   });
 
   it("throws rather than reporting no messages when the tx failed", async () => {
