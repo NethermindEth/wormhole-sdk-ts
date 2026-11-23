@@ -145,7 +145,22 @@ export class StellarPlatform<N extends Network>
     tx: Transaction | FeeBumpTransaction,
   ): Promise<TxHash> {
     const sent = await rpc.sendTransaction(tx);
-    if (sent.status !== "PENDING") throw new Error(`Failed to send Stellar tx: ${sent.status}`);
+    if (sent.status !== "PENDING") {
+      // Name the tx by its locally computed hash (a fee bump by its inner tx's), and a failed
+      // fee bump by its inner tx's result code.
+      const inner = "innerTransaction" in tx ? tx.innerTransaction : tx;
+      const error = sent.errorResult;
+      const outer = error?.result();
+      const code = (
+        outer?.switch().name === "txFeeBumpInnerFailed"
+          ? outer.innerResultPair().result().result()
+          : outer
+      )?.switch().name;
+      const detail = error ? ` ${code} (${error.toXDR("base64")})` : "";
+      throw new Error(
+        `Failed to send Stellar tx ${inner.hash().toString("hex")}: ${sent.status}${detail}`,
+      );
+    }
     const result = await rpc.pollTransaction(sent.hash);
     if (result.status !== "SUCCESS")
       throw new Error(`Stellar tx ${sent.hash} failed: ${result.status}`);
