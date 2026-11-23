@@ -1,5 +1,5 @@
-import type { rpc as SorobanRpc, xdr } from "@stellar/stellar-sdk";
-import { nativeToScVal, scValToNative } from "@stellar/stellar-sdk";
+import type { rpc as SorobanRpc } from "@stellar/stellar-sdk";
+import { Address, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
 import type {
   AccountAddress,
   ChainsConfig,
@@ -167,29 +167,34 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
     );
   }
 
-  // Fetch and decode the core's `message_published` events for a transaction.
+  // Decode the core's `message_published` events from a transaction's result meta.
   private async parseEvents(txid: TxHash): Promise<PublishedMessage[]> {
     const tx = await this.provider.getTransaction(txid);
     if (tx.status !== "SUCCESS")
       throw new Error(`Stellar tx ${txid} did not succeed: ${tx.status}`);
 
-    // The events of interest are all in the ledger the tx landed in; bounding
-    // the query there keeps it from scanning every later ledger too.
-    const { events } = await this.provider.getEvents({
-      startLedger: tx.ledger,
-      endLedger: tx.ledger + 1,
-      filters: [{ type: "contract", contractIds: [this.coreAddress] }],
-    });
+    // A Soroban transaction has one operation. Meta v4 holds its contract
+    // events on that operation, and meta v3 holds them in `sorobanMeta`.
+    // Diagnostic events are never read: they are not part of the transaction
+    // result, and they include events from calls that failed.
+    const meta = tx.resultMetaXdr;
+    const events =
+      meta.switch() === 4
+        ? meta.v4().operations()[0]?.events() ?? []
+        : meta.v3().sorobanMeta()?.events() ?? [];
 
     const messages: PublishedMessage[] = [];
     for (const ev of events) {
-      if (ev.txHash !== txid) continue;
-      if (!ev.topic.some((t) => scValToNative(t) === "message_published")) continue;
+      const id = ev.contractId();
+      const contract = id && Address.fromScAddress(xdr.ScAddress.scAddressTypeContract(id));
+      if (contract?.toString() !== this.coreAddress) continue;
+      const body = ev.body().v0();
+      if (!body.topics().some((t) => scValToNative(t) === "message_published")) continue;
 
       // The event wire carries the raw 32-byte contract id as the emitter (not
       // the keccak256 hash_address), surfaced here as a raw UniversalAddress.
       // consistency_level is a U32 (1=Confirmed / 32=Finalized).
-      const v = scValToNative(ev.value) as {
+      const v = scValToNative(body.data()) as {
         nonce: number | bigint;
         sequence: number | bigint;
         emitter_address: Uint8Array;

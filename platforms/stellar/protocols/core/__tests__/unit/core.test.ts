@@ -4,58 +4,102 @@ import { StellarAddress } from "@wormhole-foundation/sdk-stellar";
 import { StellarWormholeCore } from "../../src/core.js";
 
 const CORE = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
+const OTHER = "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA";
 const TXID = "3389e9f0f1a0b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b";
 const EMITTER = StrKey.decodeContract(CORE); // raw 32-byte contract id (the Core emitter form)
-const LEDGER = 100;
 
-// Build a `message_published` contract event as the RPC surfaces it: topics and
-// value already parsed to xdr.ScVal. Field names/types follow the core ABI as
-// observed on a localnet deployment.
-const publishedEvent = (
-  txHash: string,
-  topic: string,
-): { txHash: string; topic: xdr.ScVal[]; value: xdr.ScVal } => ({
-  txHash,
-  topic: [nativeToScVal(topic, { type: "symbol" })],
-  value: nativeToScVal(
-    {
-      nonce: 7,
-      sequence: 0n,
-      emitter_address: Buffer.from(EMITTER),
-      payload: Buffer.from([1, 2, 3]),
-      consistency_level: 32,
-    },
-    {
-      type: {
-        nonce: ["symbol", "u32"],
-        sequence: ["symbol", "u64"],
-        emitter_address: ["symbol", "bytes"],
-        payload: ["symbol", "bytes"],
-        consistency_level: ["symbol", "u32"],
-      },
-    },
-  ),
-});
+const symbol = (s: string) => nativeToScVal(s, { type: "symbol" });
+
+// Build a contract event as a transaction's result meta holds it: by default,
+// a `message_published` event from the core. Field names/types follow the
+// core ABI as observed on a localnet deployment.
+const publishedEvent = ({
+  contract = CORE,
+  topics = [symbol("wormhole"), symbol("message_published")],
+} = {}) =>
+  new xdr.ContractEvent({
+    ext: new xdr.ExtensionPoint(0),
+    contractId: StrKey.decodeContract(contract) as any,
+    type: xdr.ContractEventType.contract(),
+    body: new xdr.ContractEventBody(
+      0,
+      new xdr.ContractEventV0({
+        topics,
+        data: nativeToScVal(
+          {
+            nonce: 7,
+            sequence: 0n,
+            emitter_address: Buffer.from(EMITTER),
+            payload: Buffer.from([1, 2, 3]),
+            consistency_level: 32,
+          },
+          {
+            type: {
+              nonce: ["symbol", "u32"],
+              sequence: ["symbol", "u64"],
+              emitter_address: ["symbol", "bytes"],
+              payload: ["symbol", "bytes"],
+              consistency_level: ["symbol", "u32"],
+            },
+          },
+        ),
+      }),
+    ),
+  });
+
+// The result meta of a Soroban transaction since protocol 23 (v4), and before it
+// (v3), decoded from XDR the way the RPC client decodes it.
+const decoded = (meta: xdr.TransactionMeta) => xdr.TransactionMeta.fromXDR(meta.toXDR());
+const metaV4 = (events: xdr.ContractEvent[], diagnosticEvents: xdr.DiagnosticEvent[] = []) =>
+  decoded(
+    new xdr.TransactionMeta(
+      4,
+      new xdr.TransactionMetaV4({
+        ext: new xdr.ExtensionPoint(0),
+        txChangesBefore: [],
+        operations: [
+          new xdr.OperationMetaV2({ ext: new xdr.ExtensionPoint(0), changes: [], events }),
+        ],
+        txChangesAfter: [],
+        sorobanMeta: null,
+        events: [],
+        diagnosticEvents,
+      }),
+    ),
+  );
+const metaV3 = (events: xdr.ContractEvent[]) =>
+  decoded(
+    new xdr.TransactionMeta(
+      3,
+      new xdr.TransactionMetaV3({
+        ext: new xdr.ExtensionPoint(0),
+        txChangesBefore: [],
+        operations: [new xdr.OperationMeta({ changes: [] })],
+        txChangesAfter: [],
+        sorobanMeta: new xdr.SorobanTransactionMeta({
+          ext: new xdr.SorobanTransactionMetaExt(0),
+          events,
+          returnValue: xdr.ScVal.scvVoid(),
+          diagnosticEvents: [],
+        }),
+      }),
+    ),
+  );
 
 type ProviderOpts = {
-  events?: unknown[];
-  status?: string;
+  // The contract events of the transaction, held in v4 meta.
+  events?: xdr.ContractEvent[];
+  // Overrides for the rest of the getTransaction response.
+  tx?: Record<string, unknown>;
   // Per invoked method: the ScVal the contract returns, or an error message.
   // (An ScVal cannot be probed with `"error" in …` — every ScVal carries an
   // `error()` arm accessor — so the two cases are told apart by type.)
   reads?: Record<string, xdr.ScVal | string>;
 };
 
-// Records every getEvents request so tests can assert the query is bounded.
-const eventRequests: any[] = [];
-
-const providerWith = ({ events = [], status = "SUCCESS", reads = {} }: ProviderOpts) =>
+const providerWith = ({ events = [], tx = {}, reads = {} }: ProviderOpts) =>
   ({
-    getTransaction: async (hash: string) => ({ status, ledger: LEDGER, txHash: hash }),
-    getEvents: async (req: any) => {
-      eventRequests.push(req);
-      return { events, latestLedger: LEDGER, cursor: "" };
-    },
+    getTransaction: async () => ({ status: "SUCCESS", resultMetaXdr: metaV4(events), ...tx }),
     simulateTransaction: async (tx: any) => {
       // The read-only builder puts exactly one InvokeHostFunction op on the tx.
       const method = tx.operations[0]!.func.invokeContract().functionName().toString();
@@ -75,18 +119,14 @@ const drain = async (gen: AsyncGenerator<unknown>) => {
   return out;
 };
 
-beforeEach(() => (eventRequests.length = 0));
-
 describe("StellarWormholeCore.parse", () => {
   it("decodes a message_published event into a reobserved VAA", async () => {
-    const [vaa] = await coreWith({
-      events: [publishedEvent(TXID, "message_published")],
-    }).parseMessages(TXID);
+    const [vaa] = await coreWith({ events: [publishedEvent()] }).parseMessages(TXID);
     expect(vaa!.emitterChain).toBe("Stellar");
     expect(vaa!.sequence).toBe(0n);
     expect(vaa!.nonce).toBe(7);
     expect(vaa!.consistencyLevel).toBe(32);
-    expect(vaa!.payload).toEqual(new Uint8Array([1, 2, 3]));
+    expect([...vaa!.payload]).toEqual([1, 2, 3]);
     expect(vaa!.signatures).toHaveLength(0);
     // emitter is the raw contract id, NOT the keccak256 hash_address
     expect(vaa!.emitterAddress.equals(new UniversalAddress(new Uint8Array(EMITTER)))).toBe(true);
@@ -94,28 +134,49 @@ describe("StellarWormholeCore.parse", () => {
   });
 
   it("parseTransaction surfaces the message id", async () => {
-    const [id] = await coreWith({
-      events: [publishedEvent(TXID, "message_published")],
-    }).parseTransaction(TXID);
+    const [id] = await coreWith({ events: [publishedEvent()] }).parseTransaction(TXID);
     expect(id!.chain).toBe("Stellar");
     expect(id!.sequence).toBe(0n);
   });
 
-  it("ignores events from other txs and non-message topics", async () => {
+  it("reads the events from v3 meta", async () => {
+    const core = coreWith({ tx: { resultMetaXdr: metaV3([publishedEvent()]) } });
+    expect(await core.parseTransaction(TXID)).toHaveLength(1);
+  });
+
+  it("reads a fee bump transaction", async () => {
+    const core = coreWith({ events: [publishedEvent()], tx: { feeBump: true } });
+    expect(await core.parseTransaction(TXID)).toHaveLength(1);
+  });
+
+  it("accepts an uppercase hash", async () => {
+    const core = coreWith({ events: [publishedEvent()] });
+    expect(await core.parseTransaction(TXID.toUpperCase())).toHaveLength(1);
+  });
+
+  // Diagnostic events repeat the events of successful calls, and add those of
+  // calls that failed.
+  it.each([true, false])(
+    "never reads diagnostic events (inSuccessfulContractCall: %s)",
+    async (inSuccessfulContractCall) => {
+      const event = new xdr.DiagnosticEvent({ inSuccessfulContractCall, event: publishedEvent() });
+      const core = coreWith({ tx: { resultMetaXdr: metaV4([], [event]) } });
+      expect(await core.parseMessages(TXID)).toHaveLength(0);
+    },
+  );
+
+  it("ignores another contract's events and non-message topics", async () => {
     const core = coreWith({
-      events: [publishedEvent("deadbeef", "message_published"), publishedEvent(TXID, "transfer")],
+      events: [
+        publishedEvent({ contract: OTHER }),
+        publishedEvent({ topics: [symbol("wormhole"), symbol("transfer")] }),
+      ],
     });
     expect(await core.parseMessages(TXID)).toHaveLength(0);
   });
 
-  it("bounds the event query to the ledger the tx landed in", async () => {
-    await coreWith({ events: [publishedEvent(TXID, "message_published")] }).parseMessages(TXID);
-    expect(eventRequests).toHaveLength(1);
-    expect(eventRequests[0]).toMatchObject({ startLedger: LEDGER, endLedger: LEDGER + 1 });
-  });
-
   it("throws rather than reporting no messages when the tx failed", async () => {
-    await expect(coreWith({ status: "FAILED" }).parseMessages(TXID)).rejects.toThrow(
+    await expect(coreWith({ tx: { status: "FAILED" } }).parseMessages(TXID)).rejects.toThrow(
       /did not succeed: FAILED/,
     );
   });
