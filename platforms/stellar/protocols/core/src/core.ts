@@ -185,6 +185,10 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
   // Decode the core's `message_published` events from a transaction's result meta.
   private async parseEvents(txid: TxHash): Promise<PublishedMessage[]> {
     const tx = await this.provider.getTransaction(txid);
+    if (tx.status === "NOT_FOUND")
+      throw new Error(
+        `Stellar tx ${txid} not found yet, or older than this RPC's oldest ledger ${tx.oldestLedger}`,
+      );
     if (tx.status !== "SUCCESS")
       throw new Error(`Stellar tx ${txid} did not succeed: ${tx.status}`);
 

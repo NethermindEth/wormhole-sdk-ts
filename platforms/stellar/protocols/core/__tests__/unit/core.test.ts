@@ -211,6 +211,13 @@ describe("StellarWormholeCore.parse", () => {
     expect(vaa!.consistencyLevel).toBe(level);
   });
 
+  it("names the RPC history window when the tx is not found", async () => {
+    const core = coreWith({ tx: { status: "NOT_FOUND", oldestLedger: 50 } });
+    await expect(core.parseMessages(TXID)).rejects.toThrow(
+      /not found yet, or older than this RPC's oldest ledger 50$/,
+    );
+  });
+
   it("throws rather than reporting no messages when the tx failed", async () => {
     await expect(coreWith({ tx: { status: "FAILED" } }).parseMessages(TXID)).rejects.toThrow(
       /did not succeed: FAILED/,

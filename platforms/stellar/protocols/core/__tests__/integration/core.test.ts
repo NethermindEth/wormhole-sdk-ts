@@ -88,8 +88,8 @@ const configured = !!(
     expect(vaa!.payload.length).toBeGreaterThan(0);
   });
 
-  it("rejects a transaction hash that did not succeed", async () => {
-    await expect(core.parseMessages("00".repeat(32))).rejects.toThrow(/did not succeed/);
+  it("rejects a transaction hash the RPC does not hold", async () => {
+    await expect(core.parseMessages("00".repeat(32))).rejects.toThrow(/not found yet/);
   });
 
   it("cannot publish: the core only accepts contract emitters", async () => {
