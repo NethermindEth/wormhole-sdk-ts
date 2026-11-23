@@ -17,9 +17,9 @@ import { StellarWormholeCore } from "../../src/core.js";
  *                               for the deployed set, to exercise verify_vaa
  *
  * To produce them on a localnet: run the stellar quickstart image, deploy the
- * core from NethermindEth/wormhole (`stellar` branch), then have a contract of
- * your own call `post_message` — the core rejects account emitters, so the
- * publishing caller has to be a contract.
+ * core from NethermindEth/wormhole (`ext-integration/stellar` @ `946cef0d`),
+ * then have a contract of your own call `post_message` — the core rejects
+ * account emitters, so the publishing caller has to be a contract.
  */
 const { STELLAR_RPC, STELLAR_CORE_CONTRACT, STELLAR_EMITTER_CONTRACT, STELLAR_PUBLISH_TXID } =
   process.env;
