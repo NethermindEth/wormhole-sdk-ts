@@ -1,5 +1,5 @@
 import type { rpc as SorobanRpc } from "@stellar/stellar-sdk";
-import { Address, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
+import { Address, StrKey, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
 import type {
   AccountAddress,
   ChainsConfig,
@@ -74,6 +74,8 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
     readonly contracts: Contracts,
   ) {
     if (!contracts.coreBridge) throw new Error(`CoreBridge address for chain ${chain} not found`);
+    if (!StrKey.isValidContract(contracts.coreBridge))
+      throw new Error(`coreBridge for chain ${chain} is not a contract id`);
     this.coreAddress = contracts.coreBridge;
   }
 

@@ -117,6 +117,17 @@ const drain = async (gen: AsyncGenerator<unknown>) => {
   return out;
 };
 
+describe("StellarWormholeCore", () => {
+  it.each([
+    ["an account", "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"],
+    ["a contract with a bad checksum", CORE.slice(0, -1) + (CORE.endsWith("A") ? "B" : "A")],
+  ])("rejects %s as the core address", (_, coreBridge) => {
+    expect(
+      () => new StellarWormholeCore("Testnet", "Stellar", providerWith({}), { coreBridge }),
+    ).toThrow("coreBridge for chain Stellar is not a contract id");
+  });
+});
+
 describe("StellarWormholeCore.parse", () => {
   it("decodes a message_published event into a reobserved VAA", async () => {
     const [vaa] = await coreWith({ events: [publishedEvent()] }).parseMessages(TXID);
