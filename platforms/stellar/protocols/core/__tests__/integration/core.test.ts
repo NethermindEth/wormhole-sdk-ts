@@ -17,9 +17,9 @@ import { StellarWormholeCore } from "../../src/core.js";
  *                               for the deployed set, to exercise verify_vaa
  *
  * To produce them on a localnet: run the stellar quickstart image, deploy the
- * core from NethermindEth/wormhole (`stellar` branch), then have a contract of
- * your own call `post_message` — the core rejects account emitters, so the
- * publishing caller has to be a contract.
+ * core from NethermindEth/wormhole (`ext-integration/stellar` @ `946cef0d`),
+ * then have a contract of your own call `post_message` — the core rejects
+ * account emitters, so the publishing caller has to be a contract.
  */
 const { STELLAR_RPC, STELLAR_CORE_CONTRACT, STELLAR_EMITTER_CONTRACT, STELLAR_PUBLISH_TXID } =
   process.env;
@@ -88,8 +88,8 @@ const configured = !!(
     expect(vaa!.payload.length).toBeGreaterThan(0);
   });
 
-  it("rejects a transaction hash that did not succeed", async () => {
-    await expect(core.parseMessages("00".repeat(32))).rejects.toThrow(/did not succeed/);
+  it("rejects a transaction hash the RPC does not hold", async () => {
+    await expect(core.parseMessages("00".repeat(32))).rejects.toThrow(/not found yet/);
   });
 
   it("cannot publish: the core only accepts contract emitters", async () => {

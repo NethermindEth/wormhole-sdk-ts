@@ -1,5 +1,5 @@
-import type { rpc as SorobanRpc, xdr } from "@stellar/stellar-sdk";
-import { nativeToScVal, scValToNative } from "@stellar/stellar-sdk";
+import type { rpc as SorobanRpc } from "@stellar/stellar-sdk";
+import { Address, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
 import type {
   AccountAddress,
   ChainsConfig,
@@ -36,6 +36,21 @@ function asBigInt(value: unknown, what: string): bigint {
   if (typeof value === "bigint" || typeof value === "number") return BigInt(value);
   throw new Error(`Expected an integer from ${what}, got: ${String(value)}`);
 }
+
+// The topics of a `message_published` event, as XDR, so that a string topic
+// with the same text does not match.
+const MESSAGE_TOPICS = ["wormhole", "message_published"].map((s) =>
+  nativeToScVal(s, { type: "symbol" }).toXDR("base64"),
+);
+
+// The fields of a `message_published` event, each with its ScVal type.
+const MESSAGE_FIELDS = {
+  nonce: "scvU32",
+  sequence: "scvU64",
+  emitter_address: "scvBytes",
+  payload: "scvBytes",
+  consistency_level: "scvU32",
+} satisfies Record<string, xdr.ScValType["name"]>;
 
 /**
  * WormholeCore bindings for the Stellar (Soroban) core contract.
@@ -167,35 +182,70 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
     );
   }
 
-  // Fetch and decode the core's `message_published` events for a transaction.
+  // Decode the core's `message_published` events from a transaction's result meta.
   private async parseEvents(txid: TxHash): Promise<PublishedMessage[]> {
     const tx = await this.provider.getTransaction(txid);
+    if (tx.status === "NOT_FOUND")
+      throw new Error(
+        `Stellar tx ${txid} not found yet, or older than this RPC's oldest ledger ${tx.oldestLedger}`,
+      );
     if (tx.status !== "SUCCESS")
       throw new Error(`Stellar tx ${txid} did not succeed: ${tx.status}`);
 
-    // The events of interest are all in the ledger the tx landed in; bounding
-    // the query there keeps it from scanning every later ledger too.
-    const { events } = await this.provider.getEvents({
-      startLedger: tx.ledger,
-      endLedger: tx.ledger + 1,
-      filters: [{ type: "contract", contractIds: [this.coreAddress] }],
-    });
+    // A Soroban transaction has one operation. Meta v4 holds its contract
+    // events on that operation, and meta v3 holds them in `sorobanMeta`.
+    // Diagnostic events are never read: they are not part of the transaction
+    // result, and they include events from calls that failed.
+    const meta = tx.resultMetaXdr;
+    const events =
+      meta.switch() === 4
+        ? meta.v4().operations()[0]?.events() ?? []
+        : meta.v3().sorobanMeta()?.events() ?? [];
 
+    // Keep only the events the guardian watcher signs, by the rules of
+    // `messageFromEvent`, `parseMessagePublished` and `parseMessageFromXDR` in
+    // `node/pkg/watchers/stellar/watcher.go` at NethermindEth/wormhole
+    // 946cef0d. The event is a contract event from the core with exactly the
+    // topics `wormhole` and `message_published`, both symbols. Its data is a
+    // map of exactly the five message fields, keyed by symbols, with a
+    // 32-byte emitter and a consistency level of at most 255.
     const messages: PublishedMessage[] = [];
     for (const ev of events) {
-      if (ev.txHash !== txid) continue;
-      if (!ev.topic.some((t) => scValToNative(t) === "message_published")) continue;
+      const id = ev.contractId();
+      const contract = id && Address.fromScAddress(xdr.ScAddress.scAddressTypeContract(id));
+      if (ev.type().name !== "contract" || contract?.toString() !== this.coreAddress) continue;
+      const body = ev.body().v0();
+      const topics = body.topics();
+      if (
+        topics.length !== MESSAGE_TOPICS.length ||
+        topics.some((t, i) => t.toXDR("base64") !== MESSAGE_TOPICS[i])
+      )
+        continue;
+
+      // With every field present and of its type, five entries leave no room
+      // for a duplicate or an extra field.
+      const data = body.data();
+      const entries = (data.switch().name === "scvMap" && data.map()) || [];
+      if (entries.some((e) => e.key().switch().name !== "scvSymbol")) continue;
+      const fields = new Map(entries.map((e) => [e.key().sym().toString(), e.val().switch().name]));
+      if (
+        entries.length !== Object.keys(MESSAGE_FIELDS).length ||
+        Object.entries(MESSAGE_FIELDS).some(([name, type]) => fields.get(name) !== type)
+      )
+        continue;
 
       // The event wire carries the raw 32-byte contract id as the emitter (not
       // the keccak256 hash_address), surfaced here as a raw UniversalAddress.
-      // consistency_level is a U32 (1=Confirmed / 32=Finalized).
-      const v = scValToNative(ev.value) as {
+      // consistency_level is a u32 on the wire; the core accepts 0 to 255, the
+      // range of the VAA's one byte.
+      const v = scValToNative(data) as {
         nonce: number | bigint;
         sequence: number | bigint;
         emitter_address: Uint8Array;
         payload: Uint8Array;
         consistency_level: number | bigint;
       };
+      if (v.emitter_address.length !== 32 || v.consistency_level > 255) continue;
       messages.push({
         emitter: new UniversalAddress(v.emitter_address),
         sequence: asBigInt(v.sequence, "message_published.sequence"),
