@@ -1,5 +1,5 @@
 import type { rpc as SorobanRpc } from "@stellar/stellar-sdk";
-import { Address, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
+import { Address, StrKey, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
 import type {
   AccountAddress,
   ChainsConfig,
@@ -74,6 +74,8 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
     readonly contracts: Contracts,
   ) {
     if (!contracts.coreBridge) throw new Error(`CoreBridge address for chain ${chain} not found`);
+    if (!StrKey.isValidContract(contracts.coreBridge))
+      throw new Error(`coreBridge for chain ${chain} is not a contract id`);
     this.coreAddress = contracts.coreBridge;
   }
 
@@ -151,6 +153,12 @@ export class StellarWormholeCore<N extends Network, C extends StellarChains>
    *
    * `verify_vaa` is read-only, so this simulates the call — which reverts on an
    * invalid VAA — and returns without yielding a transaction to sign.
+   *
+   * The check runs only when the generator is iterated, so drain it, for
+   * example with `for await`. A pass means only that this RPC's simulation of
+   * `verify_vaa` succeeded, so it is as trustworthy as the RPC. A contract
+   * that consumes the VAA, such as an NTT transceiver, verifies it again on
+   * chain.
    */
   async *verifyMessage(_sender: AccountAddress<C>, vaa: VAA): AsyncGenerator<never> {
     await this.read("verify_vaa", nativeToScVal(Buffer.from(serialize(vaa)), { type: "bytes" }));
