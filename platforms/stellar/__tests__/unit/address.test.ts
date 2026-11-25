@@ -51,6 +51,14 @@ describe("StellarAddress", () => {
     expect(new StellarAddress(new StellarAddress(CONTRACT)).address).toBe(CONTRACT);
   });
 
+  it("rejects an account with a bad checksum and a muxed account", () => {
+    const badChecksum = ACCOUNT.slice(0, -1) + (ACCOUNT.endsWith("A") ? "B" : "A");
+    expect(() => new StellarAddress(badChecksum)).toThrow(
+      `Invalid Stellar address: ${badChecksum}`,
+    );
+    expect(() => new StellarAddress(MUXED)).toThrow(`Invalid Stellar address: ${MUXED}`);
+  });
+
   it.each([
     ["a secret seed", SEED],
     ["a quoted secret seed after a space", ` "${SEED}"`],
