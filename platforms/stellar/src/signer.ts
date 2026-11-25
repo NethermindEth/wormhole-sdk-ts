@@ -20,18 +20,30 @@ export async function getStellarSigner(
 export class StellarSigner<N extends Network, C extends StellarChains>
   implements SignAndSendSigner<N, C>
 {
+  readonly #keypair: Keypair;
+
   constructor(
     private _chain: C,
     private _rpc: SorobanRpc.Server,
-    private _keypair: Keypair,
-  ) {}
+    keypair: Keypair,
+  ) {
+    this.#keypair = keypair;
+  }
 
   chain(): C {
     return this._chain;
   }
 
   address(): string {
-    return this._keypair.publicKey();
+    return this.#keypair.publicKey();
+  }
+
+  /**
+   * Returns the public key, which `JSON.stringify` prints for the signer. The keypair sits in a
+   * private field, so neither JSON nor `util.inspect` shows the secret key.
+   */
+  toJSON(): string {
+    return this.address();
   }
 
   async signAndSend(txs: UnsignedTransaction<N, C>[]): Promise<TxHash[]> {
@@ -43,7 +55,7 @@ export class StellarSigner<N extends Network, C extends StellarChains>
       // minimal-ts: signing non-source Soroban auth entries (authorizeEntry)
       // lands with the NTT layer — the first caller that authorizes an address
       // other than the transaction source.
-      transaction.sign(this._keypair);
+      transaction.sign(this.#keypair);
       txhashes.push(await StellarPlatform.sendAndConfirm(this._rpc, transaction));
     }
     return txhashes;
