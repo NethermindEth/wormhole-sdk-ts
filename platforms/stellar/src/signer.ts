@@ -1,4 +1,4 @@
-import { Keypair, rpc as SorobanRpc } from "@stellar/stellar-sdk";
+import { Keypair, extractBaseAddress, rpc as SorobanRpc } from "@stellar/stellar-sdk";
 import type {
   Network,
   SignAndSendSigner,
@@ -10,6 +10,14 @@ import { StellarPlatform } from "./platform.js";
 import type { StellarChains } from "./types.js";
 import type { StellarUnsignedTransaction } from "./unsignedTransaction.js";
 
+/**
+ * Creates a signer that signs with `secretKey` and submits through `rpc`.
+ *
+ * The signer refuses a transaction for another network than `rpc` serves, whose transaction or
+ * operation source is another account, with no upper time bound, or that holds anything but one
+ * `invokeHostFunction` operation. Sign a `restoreFootprint` or `extendFootprintTtl` transaction
+ * with stellar-sdk directly.
+ */
 export async function getStellarSigner(
   rpc: SorobanRpc.Server,
   secretKey: string,
@@ -63,16 +71,22 @@ export class StellarSigner<N extends Network, C extends StellarChains>
         refuse(
           `passphrase "${transaction.networkPassphrase}" is not ${utx.network}'s "${passphrase}"`,
         );
+      const source = extractBaseAddress(transaction.source);
+      if (source !== this.address()) refuse(`source ${source} is not ${this.address()}`);
+      // An operation's own source is the account its source-account auth entries authorize.
+      const opSource = transaction.operations[0]?.source;
+      if (opSource && extractBaseAddress(opSource) !== this.address())
+        refuse(`operation source ${opSource} is not ${this.address()}`);
+      if (!Number(transaction.timeBounds?.maxTime)) refuse("it has no upper time bound");
+      const ops = transaction.operations.map((op) => op.type).join(", ");
+      if (ops !== "invokeHostFunction") refuse(`operations ${ops} are not one invokeHostFunction`);
       return transaction;
     });
 
     const txhashes: TxHash[] = [];
     for (const transaction of transactions) {
-      // The generators yield an already-prepared (simulated + assembled) tx, so
-      // signing the envelope covers source-account authorization.
-      // minimal-ts: signing non-source Soroban auth entries (authorizeEntry)
-      // lands with the NTT layer — the first caller that authorizes an address
-      // other than the transaction source.
+      // The signer signs only the envelope, which authorizes the source account's auth entries
+      // and no other address's.
       transaction.sign(this.#keypair);
       txhashes.push(await StellarPlatform.sendAndConfirm(this._rpc, transaction));
     }

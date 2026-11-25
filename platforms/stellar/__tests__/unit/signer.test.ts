@@ -1,6 +1,15 @@
 import { jest } from "@jest/globals";
 import { inspect } from "node:util";
-import { Account, Contract, Keypair, Networks, TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Contract,
+  Keypair,
+  MuxedAccount,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
 import { StellarPlatform } from "../../src/platform.js";
 import { StellarSigner, getStellarSigner } from "../../src/signer.js";
 import { StellarUnsignedTransaction } from "../../src/unsignedTransaction.js";
@@ -12,20 +21,21 @@ const CONTRACT = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const signerOn = (passphrase: string = Networks.TESTNET) =>
   getStellarSigner({ getNetwork: async () => ({ passphrase }) } as any, keypair.secret());
 
-// A contract call from the signer's account, labelled Testnet.
-const call = ({ passphrase = Networks.TESTNET as string } = {}) =>
-  new StellarUnsignedTransaction(
-    new TransactionBuilder(new Account(keypair.publicKey(), "1"), {
-      fee: "100",
-      networkPassphrase: passphrase,
-      timebounds: { minTime: 0, maxTime: 1_800_000_000 },
-    })
-      .addOperation(new Contract(CONTRACT).call("transfer"))
-      .build(),
-    "Testnet",
-    "Stellar",
-    "transfer",
-  );
+// A contract call from the signer's account, labelled Testnet, with the given overrides.
+const call = ({
+  passphrase = Networks.TESTNET as string,
+  source = new Account(keypair.publicKey(), "1") as Account | MuxedAccount,
+  maxTime = 1_800_000_000,
+  ops = [new Contract(CONTRACT).call("transfer")] as xdr.Operation[],
+} = {}) => {
+  const builder = new TransactionBuilder(source, {
+    fee: "100",
+    networkPassphrase: passphrase,
+    timebounds: { minTime: 0, maxTime },
+  });
+  ops.forEach((op) => builder.addOperation(op));
+  return new StellarUnsignedTransaction(builder.build(), "Testnet", "Stellar", "transfer");
+};
 
 let sent: jest.SpiedFunction<typeof StellarPlatform.sendAndConfirm>;
 beforeEach(() => {
@@ -75,5 +85,47 @@ describe("StellarSigner", () => {
       signer.signAndSend([call(), call({ passphrase: Networks.PUBLIC })]),
     ).rejects.toThrow(/passphrase/);
     expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("refuses a transaction from another source account", async () => {
+    const other = Keypair.random().publicKey();
+    await expect(
+      (await signerOn()).signAndSend([call({ source: new Account(other, "1") })]),
+    ).rejects.toThrow(`source ${other} is not ${keypair.publicKey()}`);
+  });
+
+  it("refuses an operation with another source account", async () => {
+    const other = Keypair.random().publicKey();
+    const ops = [
+      Operation.invokeContractFunction({
+        contract: CONTRACT,
+        function: "transfer",
+        args: [],
+        source: other,
+      }),
+    ];
+    await expect((await signerOn()).signAndSend([call({ ops })])).rejects.toThrow(
+      `operation source ${other} is not ${keypair.publicKey()}`,
+    );
+  });
+
+  it("signs a transaction from a muxed account of the signer's account", async () => {
+    const source = new MuxedAccount(new Account(keypair.publicKey(), "1"), "7");
+    expect(await (await signerOn()).signAndSend([call({ source })])).toHaveLength(1);
+  });
+
+  it("refuses a transaction with no upper time bound", async () => {
+    await expect((await signerOn()).signAndSend([call({ maxTime: 0 })])).rejects.toThrow(
+      "no upper time bound",
+    );
+  });
+
+  it.each([
+    ["two contract calls", [new Contract(CONTRACT).call("a"), new Contract(CONTRACT).call("b")]],
+    ["a bumpSequence", [Operation.bumpSequence({ bumpTo: "0" })]],
+  ])("refuses %s", async (_, ops) => {
+    await expect((await signerOn()).signAndSend([call({ ops })])).rejects.toThrow(
+      "are not one invokeHostFunction",
+    );
   });
 });
