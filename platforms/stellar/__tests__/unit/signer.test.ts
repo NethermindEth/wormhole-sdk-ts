@@ -12,24 +12,26 @@ import {
 } from "@stellar/stellar-sdk";
 import { StellarPlatform } from "../../src/platform.js";
 import { StellarSigner, getStellarSigner } from "../../src/signer.js";
+import type { StellarSignerOptions } from "../../src/signer.js";
 import { StellarUnsignedTransaction } from "../../src/unsignedTransaction.js";
 
 const keypair = Keypair.random();
 const CONTRACT = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 
 // A signer whose RPC serves the network with `passphrase`.
-const signerOn = (passphrase: string = Networks.TESTNET) =>
-  getStellarSigner({ getNetwork: async () => ({ passphrase }) } as any, keypair.secret());
+const signerOn = (passphrase: string = Networks.TESTNET, opts?: StellarSignerOptions) =>
+  getStellarSigner({ getNetwork: async () => ({ passphrase }) } as any, keypair.secret(), opts);
 
 // A contract call from the signer's account, labelled Testnet, with the given overrides.
 const call = ({
   passphrase = Networks.TESTNET as string,
   source = new Account(keypair.publicKey(), "1") as Account | MuxedAccount,
   maxTime = 1_800_000_000,
+  fee = "100",
   ops = [new Contract(CONTRACT).call("transfer")] as xdr.Operation[],
 } = {}) => {
   const builder = new TransactionBuilder(source, {
-    fee: "100",
+    fee,
     networkPassphrase: passphrase,
     timebounds: { minTime: 0, maxTime },
   });
@@ -127,5 +129,20 @@ describe("StellarSigner", () => {
     await expect((await signerOn()).signAndSend([call({ ops })])).rejects.toThrow(
       "are not one invokeHostFunction",
     );
+  });
+
+  it("refuses a fee above the default maxFee of 5 XLM", async () => {
+    await expect((await signerOn()).signAndSend([call({ fee: "50000001" })])).rejects.toThrow(
+      "fee 50000001 is above maxFee (50000000)",
+    );
+  });
+
+  it("signs a fee of exactly 5 XLM", async () => {
+    expect(await (await signerOn()).signAndSend([call({ fee: "50000000" })])).toHaveLength(1);
+  });
+
+  it("signs a fee up to the maxFee it was given", async () => {
+    const signer = await signerOn(Networks.TESTNET, { maxFee: 100_000_000n });
+    expect(await signer.signAndSend([call({ fee: "60000000" })])).toHaveLength(1);
   });
 });

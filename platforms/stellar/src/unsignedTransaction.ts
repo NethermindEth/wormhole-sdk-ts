@@ -7,6 +7,9 @@ import type { StellarChains } from "./types.js";
  * Soroban requires every invocation to be simulated so the footprint and
  * resource fee are known; the generators do that before yielding, so the signer
  * only has to sign and submit.
+ *
+ * `transaction.fee` is the whole fee in stroops, resource fee included. It is the fee a wallet
+ * shows, and the fee a `StellarSigner` caps with `maxFee`.
  */
 export class StellarUnsignedTransaction<N extends Network, C extends StellarChains>
   implements UnsignedTransaction<N, C>
