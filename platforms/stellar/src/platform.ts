@@ -39,6 +39,10 @@ import { _platform } from "./types.js";
 // A throwaway source account for read-only simulations; it never signs or submits.
 const READ_ONLY_SOURCE = StrKey.encodeEd25519PublicKey(Buffer.alloc(32));
 
+// Each RPC client's answer to getNetwork. A client cannot change networks, so an answer holds for
+// the client's life; a rejected one is dropped so that the next call asks again.
+const rpcNetworks = new WeakMap<SorobanRpc.Server, Promise<SorobanRpc.Api.GetNetworkResponse>>();
+
 // How long sendAndConfirm keeps polling after a transaction's time bound, or after the send when
 // that is later, so the RPC can ingest the first ledger that closes past the bound.
 const OUTCOME_MARGIN_MS = 60_000;
@@ -255,7 +259,13 @@ export class StellarPlatform<N extends Network>
   }
 
   static async chainFromRpc(rpc: SorobanRpc.Server): Promise<[Network, StellarChains]> {
-    const { passphrase } = await rpc.getNetwork();
+    let answer = rpcNetworks.get(rpc);
+    if (!answer) {
+      answer = rpc.getNetwork();
+      rpcNetworks.set(rpc, answer);
+      answer.catch(() => rpcNetworks.delete(rpc));
+    }
+    const { passphrase } = await answer;
     return StellarPlatform.chainFromChainId(passphrase);
   }
 

@@ -278,3 +278,21 @@ describe("StellarPlatform.sendAndConfirm", () => {
     expect(Date.now()).toBeGreaterThanOrEqual((BOUND - 30 + 60) * 1000);
   });
 });
+
+describe("StellarPlatform.chainFromRpc", () => {
+  it("asks each rpc client for its network once", async () => {
+    const rpc = { getNetwork: jest.fn(replies({ passphrase: Networks.TESTNET })) };
+    expect(await StellarPlatform.chainFromRpc(rpc as any)).toEqual(["Testnet", "Stellar"]);
+    expect(await StellarPlatform.chainFromRpc(rpc as any)).toEqual(["Testnet", "Stellar"]);
+    expect(rpc.getNetwork).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks again after a failed answer", async () => {
+    const rpc = {
+      getNetwork: jest.fn(replies(new Error("socket hang up"), { passphrase: Networks.TESTNET })),
+    };
+    await expect(StellarPlatform.chainFromRpc(rpc as any)).rejects.toThrow("socket hang up");
+    expect(await StellarPlatform.chainFromRpc(rpc as any)).toEqual(["Testnet", "Stellar"]);
+    expect(rpc.getNetwork).toHaveBeenCalledTimes(2);
+  });
+});
