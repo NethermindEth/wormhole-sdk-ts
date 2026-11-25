@@ -317,6 +317,48 @@ describe("StellarPlatform.simulateRead", () => {
     ).rejects.toThrow("Read of decimals is for Testnet, but the RPC serves Mainnet");
     expect(rpc.simulateTransaction).not.toHaveBeenCalled();
   });
+
+  it("throws when a successful simulation has no result", async () => {
+    const rpc = {
+      getNetwork: async () => ({ passphrase: Networks.TESTNET }),
+      simulateTransaction: async () => ({}),
+    };
+    await expect(
+      StellarPlatform.simulateRead(rpc as any, "Testnet", CONTRACT, "decimals"),
+    ).rejects.toThrow("Simulation of decimals returned no result");
+  });
+});
+
+describe("StellarPlatform token reads", () => {
+  const reads = (value: unknown) =>
+    jest.spyOn(StellarPlatform, "simulateRead").mockResolvedValue(value);
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([5, null])("getBalance refuses a balance of %p", async (value) => {
+    reads(value);
+    await expect(
+      StellarPlatform.getBalance("Testnet", "Stellar", {} as any, SOURCE, CONTRACT),
+    ).rejects.toThrow(`Expected an i128 balance from ${CONTRACT}`);
+  });
+
+  it("getBalance returns an i128 balance", async () => {
+    reads(5n);
+    expect(
+      await StellarPlatform.getBalance("Testnet", "Stellar", {} as any, SOURCE, CONTRACT),
+    ).toBe(5n);
+  });
+
+  it.each([256, -1, "7"])("getDecimals refuses decimals of %p", async (value) => {
+    reads(value);
+    await expect(
+      StellarPlatform.getDecimals("Testnet", "Stellar", {} as any, CONTRACT),
+    ).rejects.toThrow(`Expected decimals from 0 to 255 from ${CONTRACT}`);
+  });
+
+  it("getDecimals returns decimals from 0 to 255", async () => {
+    reads(7);
+    expect(await StellarPlatform.getDecimals("Testnet", "Stellar", {} as any, CONTRACT)).toBe(7);
+  });
 });
 
 describe("StellarPlatform.getRpc", () => {

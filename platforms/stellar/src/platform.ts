@@ -120,7 +120,13 @@ export class StellarPlatform<N extends Network>
   ): Promise<number> {
     if (isNative(token)) return nativeDecimals.nativeDecimals(StellarPlatform._platform);
     const contractId = new StellarAddress(token).toString();
-    return Number(await StellarPlatform.simulateRead(rpc, network, contractId, "decimals"));
+    const decimals = await StellarPlatform.simulateRead(rpc, network, contractId, "decimals");
+    // SEP-41 returns a u32, and Wormhole carries decimals in one byte.
+    if (typeof decimals !== "number" || decimals < 0 || decimals > 255)
+      throw new Error(
+        `Expected decimals from 0 to 255 from ${contractId}, got: ${String(decimals)}`,
+      );
+    return decimals;
   }
 
   static async getBalance(
@@ -140,7 +146,9 @@ export class StellarPlatform<N extends Network>
       "balance",
       new Address(walletAddr).toScVal(),
     );
-    return balance as bigint;
+    if (typeof balance !== "bigint")
+      throw new Error(`Expected an i128 balance from ${contractId}, got: ${String(balance)}`);
+    return balance;
   }
 
   static async getLatestBlock(rpc: SorobanRpc.Server): Promise<number> {
@@ -292,6 +300,7 @@ export class StellarPlatform<N extends Network>
     const sim = await rpc.simulateTransaction(tx);
     if (SorobanRpc.Api.isSimulationError(sim))
       throw new Error(`Simulation failed for ${method}: ${sim.error}`);
-    return scValToNative(sim.result!.retval);
+    if (!sim.result) throw new Error(`Simulation of ${method} returned no result`);
+    return scValToNative(sim.result.retval);
   }
 }
