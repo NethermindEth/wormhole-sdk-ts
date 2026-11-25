@@ -14,6 +14,9 @@ import type { AnyStellarAddress } from "./types.js";
  * `get_address_from_hash` registry, which lives in the NTT layer. The raw
  * 32-byte core emitter is a separate representation handled by the Core parse
  * path (`StrKey.encodeContract`), never through this type.
+ *
+ * `toUniversal("Stellar", text)` hashes `text` without the constructor's StrKey
+ * check, so build a `StellarAddress` first.
  */
 export class StellarAddress implements Address {
   static readonly platform = _platform;
@@ -22,13 +25,10 @@ export class StellarAddress implements Address {
   readonly address: string;
 
   constructor(address: AnyStellarAddress) {
-    if (StellarAddress.instanceof(address)) {
-      this.address = address.address;
-    } else if (typeof address === "string" && StellarAddress.isValidAddress(address)) {
-      this.address = address;
-    } else {
-      throw new Error(`Invalid Stellar address: ${address}`);
-    }
+    const text = StellarAddress.instanceof(address) ? address.address : address;
+    if (typeof text !== "string" || !StellarAddress.isValidAddress(text))
+      throw new Error(`Invalid Stellar address: ${text}`);
+    this.address = text;
   }
 
   unwrap(): string {

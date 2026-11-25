@@ -29,6 +29,17 @@ describe("StellarAddress", () => {
     expect(() => new StellarAddress("not-an-address")).toThrow();
   });
 
+  it("validates the address it copies from another Stellar address", () => {
+    class Impostor {
+      static readonly platform = "Stellar";
+      readonly address = "not-an-address";
+    }
+    expect(() => new StellarAddress(new Impostor() as any)).toThrow(
+      "Invalid Stellar address: not-an-address",
+    );
+    expect(new StellarAddress(new StellarAddress(CONTRACT)).address).toBe(CONTRACT);
+  });
+
   it("treats the raw 32-byte core emitter as a separate, invertible identity", () => {
     // The Core emitter is the raw contract id (invertible via StrKey), which is
     // deliberately NOT the keccak256 hash_address the platform address produces.
