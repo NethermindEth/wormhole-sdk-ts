@@ -80,7 +80,8 @@ export class StellarPlatform<N extends Network>
   getRpc<C extends StellarChains>(chain: C): SorobanRpc.Server {
     const config = this.config[chain];
     if (!config) throw new Error("No configuration available for chain: " + chain);
-    return new SorobanRpc.Server(config.rpc, { allowHttp: config.rpc.startsWith("http:") });
+    // Plain http is allowed only on Devnet, a local network; stellar-sdk refuses it elsewhere.
+    return new SorobanRpc.Server(config.rpc, { allowHttp: this.network === "Devnet" });
   }
 
   getChain<C extends StellarChains>(chain: C, rpc?: SorobanRpc.Server): StellarChain<N, C> {

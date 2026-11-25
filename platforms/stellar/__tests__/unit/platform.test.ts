@@ -1,6 +1,14 @@
 import { jest } from "@jest/globals";
-import { Account, Networks, Operation, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  rpc as SorobanRpc,
+  xdr,
+} from "@stellar/stellar-sdk";
 import type { FeeBumpTransaction, Transaction } from "@stellar/stellar-sdk";
+import { networkPlatformConfigs } from "@wormhole-foundation/sdk-connect";
 import { StellarPlatform, StellarTxOutcomeUnknownError } from "../../src/platform.js";
 
 const SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
@@ -308,5 +316,19 @@ describe("StellarPlatform.simulateRead", () => {
       StellarPlatform.simulateRead(rpc as any, "Testnet", CONTRACT, "decimals"),
     ).rejects.toThrow("Read of decimals is for Testnet, but the RPC serves Mainnet");
     expect(rpc.simulateTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe("StellarPlatform.getRpc", () => {
+  it("refuses a plain http rpc on Mainnet", () => {
+    const { Stellar } = networkPlatformConfigs("Mainnet", "Stellar");
+    const platform = new StellarPlatform("Mainnet", {
+      Stellar: { ...Stellar!, rpc: "http://rpc.example.com" },
+    });
+    expect(() => platform.getRpc("Stellar")).toThrow(/insecure/);
+  });
+
+  it("allows the default plain http rpc on Devnet", () => {
+    expect(new StellarPlatform("Devnet").getRpc("Stellar")).toBeInstanceOf(SorobanRpc.Server);
   });
 });
