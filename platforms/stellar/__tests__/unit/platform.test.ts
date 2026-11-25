@@ -4,6 +4,7 @@ import type { FeeBumpTransaction, Transaction } from "@stellar/stellar-sdk";
 import { StellarPlatform, StellarTxOutcomeUnknownError } from "../../src/platform.js";
 
 const SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const CONTRACT = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const BOUND = 1_800_000_000; // the transaction's maxTime, in Unix seconds
 
 // A tx with sequence 42 from SOURCE, valid until maxTime (0 means no upper bound).
@@ -294,5 +295,18 @@ describe("StellarPlatform.chainFromRpc", () => {
     await expect(StellarPlatform.chainFromRpc(rpc as any)).rejects.toThrow("socket hang up");
     expect(await StellarPlatform.chainFromRpc(rpc as any)).toEqual(["Testnet", "Stellar"]);
     expect(rpc.getNetwork).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("StellarPlatform.simulateRead", () => {
+  it("refuses a read for another network than the rpc serves", async () => {
+    const rpc = {
+      getNetwork: async () => ({ passphrase: Networks.PUBLIC }),
+      simulateTransaction: jest.fn(),
+    };
+    await expect(
+      StellarPlatform.simulateRead(rpc as any, "Testnet", CONTRACT, "decimals"),
+    ).rejects.toThrow("Read of decimals is for Testnet, but the RPC serves Mainnet");
+    expect(rpc.simulateTransaction).not.toHaveBeenCalled();
   });
 });

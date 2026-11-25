@@ -277,6 +277,10 @@ export class StellarPlatform<N extends Network>
     method: string,
     ...args: xdr.ScVal[]
   ): Promise<unknown> {
+    // A simulation does not check the passphrase, so an RPC on another network would answer.
+    const [served] = await StellarPlatform.chainFromRpc(rpc);
+    if (served !== network)
+      throw new Error(`Read of ${method} is for ${network}, but the RPC serves ${served}`);
     const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, "0"), {
       fee: BASE_FEE,
       networkPassphrase: stellarNetworkPassphrase(network),
