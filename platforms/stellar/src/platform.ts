@@ -144,7 +144,7 @@ export class StellarPlatform<N extends Network>
       network,
       contractId,
       "balance",
-      new Address(walletAddr).toScVal(),
+      new Address(new StellarAddress(walletAddr).toString()).toScVal(),
     );
     if (typeof balance !== "bigint")
       throw new Error(`Expected an i128 balance from ${contractId}, got: ${String(balance)}`);

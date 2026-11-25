@@ -1,6 +1,7 @@
 import { jest } from "@jest/globals";
 import {
   Account,
+  Keypair,
   Networks,
   Operation,
   TransactionBuilder,
@@ -339,6 +340,21 @@ describe("StellarPlatform token reads", () => {
     await expect(
       StellarPlatform.getBalance("Testnet", "Stellar", {} as any, SOURCE, CONTRACT),
     ).rejects.toThrow(`Expected an i128 balance from ${CONTRACT}`);
+  });
+
+  it("getBalance refuses a secret seed as the wallet before any read", async () => {
+    const read = reads(5n);
+    const seed = Keypair.random().secret();
+    const error = await StellarPlatform.getBalance(
+      "Testnet",
+      "Stellar",
+      {} as any,
+      seed,
+      CONTRACT,
+    ).catch((e: Error) => e);
+    expect((error as Error).message).toMatch(/^Invalid Stellar address/);
+    expect((error as Error).message).not.toContain(seed);
+    expect(read).not.toHaveBeenCalled();
   });
 
   it("getBalance returns an i128 balance", async () => {

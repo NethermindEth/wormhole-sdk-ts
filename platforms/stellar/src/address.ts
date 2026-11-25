@@ -26,8 +26,16 @@ export class StellarAddress implements Address {
 
   constructor(address: AnyStellarAddress) {
     const text = StellarAddress.instanceof(address) ? address.address : address;
-    if (typeof text !== "string" || !StellarAddress.isValidAddress(text))
-      throw new Error(`Invalid Stellar address: ${text}`);
+    if (typeof text !== "string" || !StellarAddress.isValidAddress(text)) {
+      // No address starts with S, but a secret seed does, valid or mistyped, and a pasted one
+      // may follow spaces or quotes. The test runs on the text the error would print, which for
+      // a Buffer is its decoded text.
+      const printed = String(text);
+      const shown = /^\W*S/.test(printed)
+        ? "it looks like a secret seed, so it is not shown"
+        : printed;
+      throw new Error(`Invalid Stellar address: ${shown}`);
+    }
     this.address = text;
   }
 
