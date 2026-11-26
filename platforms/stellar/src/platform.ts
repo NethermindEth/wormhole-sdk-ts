@@ -39,6 +39,10 @@ import { _platform } from "./types.js";
 // A throwaway source account for read-only simulations; it never signs or submits.
 const READ_ONLY_SOURCE = StrKey.encodeEd25519PublicKey(Buffer.alloc(32));
 
+// Each RPC client's answer to getNetwork. A client cannot change networks, so an answer holds for
+// the client's life; a rejected one is dropped so that the next call asks again.
+const rpcNetworks = new WeakMap<SorobanRpc.Server, Promise<SorobanRpc.Api.GetNetworkResponse>>();
+
 // How long sendAndConfirm keeps polling after a transaction's time bound, or after the send when
 // that is later, so the RPC can ingest the first ledger that closes past the bound.
 const OUTCOME_MARGIN_MS = 60_000;
@@ -76,7 +80,8 @@ export class StellarPlatform<N extends Network>
   getRpc<C extends StellarChains>(chain: C): SorobanRpc.Server {
     const config = this.config[chain];
     if (!config) throw new Error("No configuration available for chain: " + chain);
-    return new SorobanRpc.Server(config.rpc, { allowHttp: config.rpc.startsWith("http:") });
+    // Plain http is allowed only on Devnet, a local network; stellar-sdk refuses it elsewhere.
+    return new SorobanRpc.Server(config.rpc, { allowHttp: this.network === "Devnet" });
   }
 
   getChain<C extends StellarChains>(chain: C, rpc?: SorobanRpc.Server): StellarChain<N, C> {
@@ -115,7 +120,13 @@ export class StellarPlatform<N extends Network>
   ): Promise<number> {
     if (isNative(token)) return nativeDecimals.nativeDecimals(StellarPlatform._platform);
     const contractId = new StellarAddress(token).toString();
-    return Number(await StellarPlatform.simulateRead(rpc, network, contractId, "decimals"));
+    const decimals = await StellarPlatform.simulateRead(rpc, network, contractId, "decimals");
+    // SEP-41 returns a u32, and Wormhole carries decimals in one byte.
+    if (typeof decimals !== "number" || decimals < 0 || decimals > 255)
+      throw new Error(
+        `Expected decimals from 0 to 255 from ${contractId}, got: ${String(decimals)}`,
+      );
+    return decimals;
   }
 
   static async getBalance(
@@ -133,9 +144,11 @@ export class StellarPlatform<N extends Network>
       network,
       contractId,
       "balance",
-      new Address(walletAddr).toScVal(),
+      new Address(new StellarAddress(walletAddr).toString()).toScVal(),
     );
-    return balance as bigint;
+    if (typeof balance !== "bigint")
+      throw new Error(`Expected an i128 balance from ${contractId}, got: ${String(balance)}`);
+    return balance;
   }
 
   static async getLatestBlock(rpc: SorobanRpc.Server): Promise<number> {
@@ -255,7 +268,13 @@ export class StellarPlatform<N extends Network>
   }
 
   static async chainFromRpc(rpc: SorobanRpc.Server): Promise<[Network, StellarChains]> {
-    const { passphrase } = await rpc.getNetwork();
+    let answer = rpcNetworks.get(rpc);
+    if (!answer) {
+      answer = rpc.getNetwork();
+      rpcNetworks.set(rpc, answer);
+      answer.catch(() => rpcNetworks.delete(rpc));
+    }
+    const { passphrase } = await answer;
     return StellarPlatform.chainFromChainId(passphrase);
   }
 
@@ -267,6 +286,10 @@ export class StellarPlatform<N extends Network>
     method: string,
     ...args: xdr.ScVal[]
   ): Promise<unknown> {
+    // A simulation does not check the passphrase, so an RPC on another network would answer.
+    const [served] = await StellarPlatform.chainFromRpc(rpc);
+    if (served !== network)
+      throw new Error(`Read of ${method} is for ${network}, but the RPC serves ${served}`);
     const tx = new TransactionBuilder(new Account(READ_ONLY_SOURCE, "0"), {
       fee: BASE_FEE,
       networkPassphrase: stellarNetworkPassphrase(network),
@@ -277,6 +300,7 @@ export class StellarPlatform<N extends Network>
     const sim = await rpc.simulateTransaction(tx);
     if (SorobanRpc.Api.isSimulationError(sim))
       throw new Error(`Simulation failed for ${method}: ${sim.error}`);
-    return scValToNative(sim.result!.retval);
+    if (!sim.result) throw new Error(`Simulation of ${method} returned no result`);
+    return scValToNative(sim.result.retval);
   }
 }

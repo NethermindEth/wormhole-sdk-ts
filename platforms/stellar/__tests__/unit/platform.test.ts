@@ -1,9 +1,19 @@
 import { jest } from "@jest/globals";
-import { Account, Networks, Operation, TransactionBuilder, xdr } from "@stellar/stellar-sdk";
+import {
+  Account,
+  Keypair,
+  Networks,
+  Operation,
+  TransactionBuilder,
+  rpc as SorobanRpc,
+  xdr,
+} from "@stellar/stellar-sdk";
 import type { FeeBumpTransaction, Transaction } from "@stellar/stellar-sdk";
+import { networkPlatformConfigs } from "@wormhole-foundation/sdk-connect";
 import { StellarPlatform, StellarTxOutcomeUnknownError } from "../../src/platform.js";
 
 const SOURCE = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+const CONTRACT = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC";
 const BOUND = 1_800_000_000; // the transaction's maxTime, in Unix seconds
 
 // A tx with sequence 42 from SOURCE, valid until maxTime (0 means no upper bound).
@@ -276,5 +286,107 @@ describe("StellarPlatform.sendAndConfirm", () => {
       maxTime: 0,
     });
     expect(Date.now()).toBeGreaterThanOrEqual((BOUND - 30 + 60) * 1000);
+  });
+});
+
+describe("StellarPlatform.chainFromRpc", () => {
+  it("asks each rpc client for its network once", async () => {
+    const rpc = { getNetwork: jest.fn(replies({ passphrase: Networks.TESTNET })) };
+    expect(await StellarPlatform.chainFromRpc(rpc as any)).toEqual(["Testnet", "Stellar"]);
+    expect(await StellarPlatform.chainFromRpc(rpc as any)).toEqual(["Testnet", "Stellar"]);
+    expect(rpc.getNetwork).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks again after a failed answer", async () => {
+    const rpc = {
+      getNetwork: jest.fn(replies(new Error("socket hang up"), { passphrase: Networks.TESTNET })),
+    };
+    await expect(StellarPlatform.chainFromRpc(rpc as any)).rejects.toThrow("socket hang up");
+    expect(await StellarPlatform.chainFromRpc(rpc as any)).toEqual(["Testnet", "Stellar"]);
+    expect(rpc.getNetwork).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("StellarPlatform.simulateRead", () => {
+  it("refuses a read for another network than the rpc serves", async () => {
+    const rpc = {
+      getNetwork: async () => ({ passphrase: Networks.PUBLIC }),
+      simulateTransaction: jest.fn(),
+    };
+    await expect(
+      StellarPlatform.simulateRead(rpc as any, "Testnet", CONTRACT, "decimals"),
+    ).rejects.toThrow("Read of decimals is for Testnet, but the RPC serves Mainnet");
+    expect(rpc.simulateTransaction).not.toHaveBeenCalled();
+  });
+
+  it("throws when a successful simulation has no result", async () => {
+    const rpc = {
+      getNetwork: async () => ({ passphrase: Networks.TESTNET }),
+      simulateTransaction: async () => ({}),
+    };
+    await expect(
+      StellarPlatform.simulateRead(rpc as any, "Testnet", CONTRACT, "decimals"),
+    ).rejects.toThrow("Simulation of decimals returned no result");
+  });
+});
+
+describe("StellarPlatform token reads", () => {
+  const reads = (value: unknown) =>
+    jest.spyOn(StellarPlatform, "simulateRead").mockResolvedValue(value);
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([5, null])("getBalance refuses a balance of %p", async (value) => {
+    reads(value);
+    await expect(
+      StellarPlatform.getBalance("Testnet", "Stellar", {} as any, SOURCE, CONTRACT),
+    ).rejects.toThrow(`Expected an i128 balance from ${CONTRACT}`);
+  });
+
+  it("getBalance refuses a secret seed as the wallet before any read", async () => {
+    const read = reads(5n);
+    const seed = Keypair.random().secret();
+    const error = await StellarPlatform.getBalance(
+      "Testnet",
+      "Stellar",
+      {} as any,
+      seed,
+      CONTRACT,
+    ).catch((e: Error) => e);
+    expect((error as Error).message).toMatch(/^Invalid Stellar address/);
+    expect((error as Error).message).not.toContain(seed);
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("getBalance returns an i128 balance", async () => {
+    reads(5n);
+    expect(
+      await StellarPlatform.getBalance("Testnet", "Stellar", {} as any, SOURCE, CONTRACT),
+    ).toBe(5n);
+  });
+
+  it.each([256, -1, "7"])("getDecimals refuses decimals of %p", async (value) => {
+    reads(value);
+    await expect(
+      StellarPlatform.getDecimals("Testnet", "Stellar", {} as any, CONTRACT),
+    ).rejects.toThrow(`Expected decimals from 0 to 255 from ${CONTRACT}`);
+  });
+
+  it("getDecimals returns decimals from 0 to 255", async () => {
+    reads(7);
+    expect(await StellarPlatform.getDecimals("Testnet", "Stellar", {} as any, CONTRACT)).toBe(7);
+  });
+});
+
+describe("StellarPlatform.getRpc", () => {
+  it("refuses a plain http rpc on Mainnet", () => {
+    const { Stellar } = networkPlatformConfigs("Mainnet", "Stellar");
+    const platform = new StellarPlatform("Mainnet", {
+      Stellar: { ...Stellar!, rpc: "http://rpc.example.com" },
+    });
+    expect(() => platform.getRpc("Stellar")).toThrow(/insecure/);
+  });
+
+  it("allows the default plain http rpc on Devnet", () => {
+    expect(new StellarPlatform("Devnet").getRpc("Stellar")).toBeInstanceOf(SorobanRpc.Server);
   });
 });

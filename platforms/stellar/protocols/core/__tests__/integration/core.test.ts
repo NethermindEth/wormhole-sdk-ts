@@ -1,7 +1,8 @@
 import { StrKey, rpc as SorobanRpc } from "@stellar/stellar-sdk";
 import { UniversalAddress, createVAA } from "@wormhole-foundation/sdk-connect";
+import type { Network } from "@wormhole-foundation/sdk-connect";
 import { mocks } from "@wormhole-foundation/sdk-definitions/testing";
-import { StellarAddress } from "@wormhole-foundation/sdk-stellar";
+import { StellarAddress, StellarPlatform } from "@wormhole-foundation/sdk-stellar";
 import { StellarWormholeCore } from "../../src/core.js";
 
 /**
@@ -34,15 +35,17 @@ const configured = !!(
 (configured ? describe : describe.skip)("StellarWormholeCore against a live core", () => {
   // Built in beforeAll: a skipped describe still runs its callback, so nothing
   // here may touch the (absent) environment when the suite is skipped.
-  let core: StellarWormholeCore<"Devnet", "Stellar">;
+  let core: StellarWormholeCore<Network, "Stellar">;
   let sender: StellarAddress;
   let emitter: UniversalAddress;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     const provider = new SorobanRpc.Server(STELLAR_RPC!, {
       allowHttp: STELLAR_RPC!.startsWith("http:"),
     });
-    core = new StellarWormholeCore("Devnet", "Stellar", provider, {
+    // Reads check that the RPC serves the core's network, so take it from the RPC.
+    const [network] = await StellarPlatform.chainFromRpc(provider);
+    core = new StellarWormholeCore(network, "Stellar", provider, {
       coreBridge: STELLAR_CORE_CONTRACT!,
     });
     sender = new StellarAddress(STELLAR_EMITTER_CONTRACT!);

@@ -1,4 +1,4 @@
-import { StrKey, nativeToScVal, xdr } from "@stellar/stellar-sdk";
+import { Networks, StrKey, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import { UniversalAddress, createVAA } from "@wormhole-foundation/sdk-connect";
 import { StellarAddress } from "@wormhole-foundation/sdk-stellar";
 import { StellarWormholeCore } from "../../src/core.js";
@@ -96,6 +96,7 @@ type ProviderOpts = {
 
 const providerWith = ({ events = [], tx = {}, reads = {} }: ProviderOpts) =>
   ({
+    getNetwork: async () => ({ passphrase: Networks.TESTNET }),
     getTransaction: async () => ({ status: "SUCCESS", resultMetaXdr: metaV4(events), ...tx }),
     simulateTransaction: async (tx: any) => {
       // The read-only builder puts exactly one InvokeHostFunction op on the tx.
@@ -115,6 +116,17 @@ const drain = async (gen: AsyncGenerator<unknown>) => {
   for await (const item of gen) out.push(item);
   return out;
 };
+
+describe("StellarWormholeCore", () => {
+  it.each([
+    ["an account", "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF"],
+    ["a contract with a bad checksum", CORE.slice(0, -1) + (CORE.endsWith("A") ? "B" : "A")],
+  ])("rejects %s as the core address", (_, coreBridge) => {
+    expect(
+      () => new StellarWormholeCore("Testnet", "Stellar", providerWith({}), { coreBridge }),
+    ).toThrow("coreBridge for chain Stellar is not a contract id");
+  });
+});
 
 describe("StellarWormholeCore.parse", () => {
   it("decodes a message_published event into a reobserved VAA", async () => {
